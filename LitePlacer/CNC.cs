@@ -9,7 +9,7 @@ using System.Threading;
 using System.Globalization;
 using System.Web.Script.Serialization;
 using Newtonsoft.Json;
-
+using System.Diagnostics;
 
 namespace LitePlacer
 {
@@ -49,7 +49,7 @@ namespace LitePlacer
             ErrorState = true;
             // Connected = false;
             Homing = false;
-            _readyEvent.Set();
+            _readyEvent.Set();           // Debug.WriteLine("!! Line 52");
             MainForm.UpdateCncConnectionStatus();
         }
 
@@ -59,7 +59,7 @@ namespace LitePlacer
             ErrorState = false;
             Connected = false;
             Homing = false;
-            _readyEvent.Set();
+            _readyEvent.Set();// Debug.WriteLine("!! Line 62");
             MainForm.UpdateCncConnectionStatus();
         }
 
@@ -79,7 +79,7 @@ namespace LitePlacer
             Com.Open(name);
             ErrorState = false;
             Homing = false;
-            _readyEvent.Set();
+            _readyEvent.Set(); //Debug.WriteLine("!! Line 82");
             Connected = Com.IsOpen;
             if (!Connected)
             {
@@ -98,14 +98,14 @@ namespace LitePlacer
             if (!Com.IsOpen)
             {
                 MainForm.DisplayText("###" + command + " discarded, com not open (readyevent set)");
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 101");
                 Connected = false;
                 return false;
             }
             if (ErrorState)
             {
                 MainForm.DisplayText("###" + command + " discarded, error state on (readyevent set)");
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 108");
                 return false;
             }
             _readyEvent.Reset();
@@ -211,6 +211,7 @@ namespace LitePlacer
 			//MainForm.DisplayText("CNC.setCurrY: "+ y.ToString()+ " CurrX= " + CurrX.ToString());
 		}
 
+        private static double CurrVirtZ;  // virtual Z based on last command.
         private static double CurrZ;
         public double CurrentZ
         {
@@ -226,6 +227,22 @@ namespace LitePlacer
         public static void setCurrZ(double z)
         {
             CurrZ = z;
+        }
+
+        public double VirtualZ
+        {
+            get
+            {
+                return (CurrVirtZ);
+            }
+            set
+            {
+                CurrVirtZ = value;
+            }
+        }
+        public static void setVirtZ(double z)
+        {
+            CurrVirtZ = z;
         }
 
         private static double CurrA;
@@ -271,7 +288,7 @@ namespace LitePlacer
             {
                 MainForm.DisplayText(" -- zero XY movement command --", KnownColor.Gray);
                 MainForm.DisplayText("ReadyEvent: zero movement command", KnownColor.Gray);
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 291");
                 return;   // already there
             }
             if ((!SlackCompensation)
@@ -297,7 +314,7 @@ namespace LitePlacer
             {
                 MainForm.DisplayText(" -- zero XY movement command --", KnownColor.Gray);
                 MainForm.DisplayText("ReadyEvent: zero movement command", KnownColor.Gray);
-                _readyEvent.Set();
+                _readyEvent.Set();// Debug.WriteLine("!! Line 317");
                 return;   // already there
             }
 			X = X + SquareCorrection * Y;
@@ -389,7 +406,7 @@ namespace LitePlacer
             {
                 MainForm.DisplayText(" -- zero XYA movement command --", KnownColor.Gray);
                 MainForm.DisplayText("ReadyEvent: zero movement command", KnownColor.Gray);
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 409");
                 return;   // already there
             }
 
@@ -508,7 +525,7 @@ namespace LitePlacer
             {
                 MainForm.DisplayText(" -- zero Z movement command --");
                 MainForm.DisplayText("ReadyEvent: zero movement command");
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 528");
                 return;   // already there
             }
             if (dZ < 1.1)
@@ -546,7 +563,7 @@ namespace LitePlacer
             if (Math.Abs(A - CurrentA) < 0.01)
             {
                 MainForm.DisplayText(" -- zero A movement command --");
-                _readyEvent.Set();
+                _readyEvent.Set(); //Debug.WriteLine("!! Line 566");
                 return;   // already there
             }
             if ((SlackCompensationA) && (CurrentA > (A - SlackCompensationDistanceA)))
@@ -842,9 +859,12 @@ namespace LitePlacer
          // =================================================================================
         public void InterpretLine(string line)
         {
-            // This is called from SerialComm dataReceived, and runs in a separate thread than UI            
-            MainForm.DisplayText("<== " + line);
-
+            // This is called from SerialComm dataReceived, and runs in a separate thread than UI    
+            if (!(line.Contains("\"stat\":5")))
+            {
+                MainForm.DisplayText("<== " + line);
+                //Debug.WriteLine("<== " + line);
+            }
             if (line.Contains("SYSTEM READY"))
             {
                 Error();
@@ -912,6 +932,7 @@ namespace LitePlacer
             if (line.StartsWith("tinyg [mm] ok>"))
             {
                 // MainForm.DisplayText("ReadyEvent ok");
+               // Debug.WriteLine("!! Line 932");
                 _readyEvent.Set();
                 return;
             }
@@ -920,11 +941,14 @@ namespace LitePlacer
             if (line.StartsWith("{\"sr\":"))
             {
                 // Status report
+               
                 NewStatusReport(line);
+                
                 if (line.Contains("\"stat\":3"))
                 {
-                    MainForm.DisplayText("ReadyEvent stat");
+                    //MainForm.DisplayText("ReadyEvent stat");
                     MainForm.ResetMotorTimer();
+                   // Debug.WriteLine("!! Line 949");
                     _readyEvent.Set();
                 }
                 return;
@@ -937,14 +961,16 @@ namespace LitePlacer
                 int i = line.IndexOf("}}");
                 line = line.Substring(0, i + 2);
                 NewStatusReport(line);
+               // Debug.WriteLine("!! Line 962");
                 _readyEvent.Set();
-                MainForm.DisplayText("ReadyEvent r:sr");
+                //MainForm.DisplayText("ReadyEvent r:sr");
                 return;
             }
 
             if (line.StartsWith("{\"r\":{\"me") || line.StartsWith("{\"r\":{\"md"))
             {
                 // response to motor power on/off commands
+               // Debug.WriteLine("!! Line 971");
                 _readyEvent.Set();
                 return;
             }
@@ -953,14 +979,16 @@ namespace LitePlacer
             {
                 // response to setting a setting or reading motor settings for saving them
                 ParameterValue(line);  // <========= causes UI update
+                //Debug.WriteLine("!! Line 980");
                 _readyEvent.Set();
-                MainForm.DisplayText("ReadyEvent r");
+                //MainForm.DisplayText("ReadyEvent r");
                 return;
             }
 
             if (line.StartsWith("{\"r\":{\"sys\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 989");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent sys group (depreciated)");
                 return;
@@ -976,6 +1004,7 @@ namespace LitePlacer
                 line = line.Substring(0, i + 2);
                 MainForm.TinyGSetting.TinyG_x = line; 
                 */
+                //Debug.WriteLine("!! Line 1005");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent x group (depreciated)");
                 return;
@@ -984,6 +1013,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"y\":"))
             {
                 // response to reading settings for saving them
+                Debug.WriteLine("!! Line 1014");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent y group (depreciated)");
                 return;
@@ -992,6 +1022,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"z\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1023");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent z group (depreciated)");
                 return;
@@ -1000,6 +1031,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"a\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1032");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent a group (depreciated)");
                 return;
@@ -1008,6 +1040,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"1\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1041");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent m1 group (depreciated)");
                 return;
@@ -1016,6 +1049,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"2\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1050");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent m2 group (depreciated)");
                 return;
@@ -1024,6 +1058,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"3\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1059");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent m3 group (depreciated)");
                 return;
@@ -1032,6 +1067,7 @@ namespace LitePlacer
             if (line.StartsWith("{\"r\":{\"4\":"))
             {
                 // response to reading settings for saving them
+                //Debug.WriteLine("!! Line 1068");
                 _readyEvent.Set();
                 MainForm.DisplayText("ReadyEvent m4 group (depreciated)");
                 return;
@@ -1109,6 +1145,7 @@ namespace LitePlacer
                 set
                 {
                     _posz = value;
+                    //Debug.WriteLine("Posz : " + _posz);
                     CNC.setCurrZ(_posz);
                     CNC.MainForm.ValueUpdater("posz", _posz.ToString("0.000", CultureInfo.InvariantCulture));
                 }

@@ -410,6 +410,10 @@ namespace LitePlacer
             {
                 if (ControlBoardJustConnected())
                 {
+                    if (Cnc.Controlboard == CNC.ControlBoardType.TinyG)
+                    {
+                        Cnc.RawWrite("\"{ sv: 1}\"");
+                    }
                     Cnc.PumpDefaultSetting();
                     Cnc.VacuumDefaultSetting();
                     OfferHoming();
@@ -2092,6 +2096,9 @@ namespace LitePlacer
             PositionConfidence = false;
             ValidMeasurement_checkBox.Checked = false;
             OpticalHome_button.BackColor = Color.Red;
+
+            CNC_Z_m(Cnc.CurrentZ - 0.01);
+            CNC_Z_m(Cnc.CurrentZ + 0.01);
             if (!MechanicalHoming_m())
             {
                 OpticalHome_button.BackColor = Color.Red;
@@ -2378,7 +2385,7 @@ namespace LitePlacer
                 _cnc_Timeout = value * 500;
             }
         }
-        public int CNC_HomingTimeout = 20;  // in seconds
+        public int CNC_HomingTimeout = 100;  // in seconds
 
         private bool CNC_RawWrite(string s)
         {
@@ -2477,6 +2484,8 @@ namespace LitePlacer
 
         private bool CNC_NozzleIsDown_m()
         {
+           // Debug.WriteLine("CNC_NozzleIsDown_m Cnc.CurrentZ: " + Cnc.CurrentZ + "   Virt: " + Cnc.CurrentZ); 
+           // Thread.Sleep(3000);   
             if ((Cnc.CurrentZ > 5) && _Zguard)
             {
                 DisplayText("Nozzle down error.");
@@ -2661,13 +2670,108 @@ namespace LitePlacer
             return (Cnc.Connected);
         }
 
+        private void CNC_BlockingVacuum_thread(bool state)
+        {
+            Debug.WriteLine("CNC_BlockingPump_thread: " + state);
+            Cnc_ReadyEvent.Reset();
+            if (state)
+            {
+                CNC_RawWrite("{\"gc\":\"M08\"}");
+                //Cnc.VacuumOn();
+            }
+            else
+            {
+                CNC_RawWrite("{\"gc\":\"M09\"}");
+                //Cnc.VacuumOn();
+            }
+            Cnc_ReadyEvent.Wait();
+            CNC_BlockingWriteDone = true;
+        }
+
+        private void CNC_BlockingPump_thread(bool state)
+        {
+            Debug.WriteLine("CNC_BlockingPump_thread: " + state);
+            Cnc_ReadyEvent.Reset();
+            if(state)
+            {
+                CNC_RawWrite("{\"gc\":\"M03\"}");
+                //Cnc.PumpOn();
+            }
+            else
+            {
+                CNC_RawWrite("{\"gc\":\"M05\"}");
+                //Cnc.PumpOn();
+            }
+            Cnc_ReadyEvent.Wait();
+            CNC_BlockingWriteDone = true;
+        }
 
         private void CNC_BlockingZ_thread(double Z)
         {
+            //Debug.WriteLine("CNC_BlockingZ_thread: " + Z);
             Cnc_ReadyEvent.Reset();
             Cnc.Z(Z);
             Cnc_ReadyEvent.Wait();
             CNC_BlockingWriteDone = true;
+        }
+
+        public bool CNC_Pump(bool p) {
+
+            CNC_BlockingWriteDone = false;
+            Thread t = new Thread(() => CNC_BlockingPump_thread(p));
+            t.IsBackground = true;
+            t.Start();
+            int i = 0;
+            while (!CNC_BlockingWriteDone)
+            {
+                Thread.Sleep(2);
+                Application.DoEvents();
+                i++;
+                if (i > _cnc_Timeout)
+                {
+                    Cnc_ReadyEvent.Set(); Debug.WriteLine("## Line CNC_Pump");   // causes CNC_Blocking_thread to exit
+                }
+            }
+            if ((i > _cnc_Timeout) || !Cnc.Connected)
+            {
+                ShowMessageBox(
+                           "CNC_CNC_Pump: Timeout / Cnc connection cut!",
+                           "Timeout",
+                           MessageBoxButtons.OK);
+                CncError();
+            }
+            return (Cnc.Connected);
+
+        }
+
+        public bool CNC_Vacuum(bool p)
+        {
+
+            CNC_BlockingWriteDone = false;
+            Thread t = new Thread(() => CNC_BlockingVacuum_thread(p));
+            t.IsBackground = true;
+            t.Start();
+            int i = 0;
+            while (!CNC_BlockingWriteDone)
+            {
+                Thread.Sleep(2);
+                Application.DoEvents();
+                i++;
+                if (i > _cnc_Timeout)
+                {
+                    Cnc_ReadyEvent.Set(); Debug.WriteLine("## Line CNC_Vacuum");   // causes CNC_Blocking_thread to exit
+                }
+            }
+            if ((i > _cnc_Timeout) || !Cnc.Connected)
+            {
+                ShowMessageBox(
+                           "CNC_CNC_Vacuum: Timeout / Cnc connection cut!",
+                           "Timeout",
+                           MessageBoxButtons.OK);
+                CncError();
+            }
+            return (Cnc.Connected);
+
         }
 
         public bool CNC_Z_m(double Z)
@@ -2720,6 +2824,7 @@ namespace LitePlacer
             }
 
             CNC_BlockingWriteDone = false;
+            //CNC.setVirtZ(Z);
             Thread t = new Thread(() => CNC_BlockingZ_thread(Z));
             t.IsBackground = true;
             t.Start();
@@ -2731,7 +2836,7 @@ namespace LitePlacer
                 i++;
                 if (i > _cnc_Timeout)
                 {
-                    Cnc_ReadyEvent.Set();   // causes CNC_Blocking_thread to exit
+                    Cnc_ReadyEvent.Set(); //Debug.WriteLine("## Line 2738");   // causes CNC_Blocking_thread to exit
                 }
             }
             if ((i > _cnc_Timeout) || !Cnc.Connected)
@@ -2808,6 +2913,7 @@ namespace LitePlacer
 
         public bool GoToFeatureLocation_m(FeatureType Shape, double FindTolerance, double MoveTolerance, out double X, out double Y)
         {
+            //Debug.WriteLine("!! CanEnableIme not find Circle");
             DisplayText("GoToFeatureLocation_m(), FindTolerance: " + FindTolerance.ToString() + ", MoveTolerance: " + MoveTolerance.ToString());
             SelectCamera(DownCamera);
             X = 100;
@@ -3003,6 +3109,29 @@ namespace LitePlacer
 
         private void OpticalHome_button_Click(object sender, EventArgs e)
         {
+            /*
+            CNC_Pump(true);
+            CNC_Z_m(Cnc.CurrentZ - 0.01);
+            CNC_Z_m(Cnc.CurrentZ + 0.01);
+            CNC_Vacuum(true);
+            CNC_Z_m(Cnc.CurrentZ - 0.01);
+            CNC_Z_m(Cnc.CurrentZ + 0.01);
+            CNC_XY_m(100, 100);
+            CNC_Z_m(30);
+            CNC_Z_m(0);
+            CNC_XY_m(10, 10);
+            CNC_Z_m(30);
+            CNC_Vacuum(false);
+            CNC_Z_m(Cnc.CurrentZ - 0.01);
+            CNC_Z_m(Cnc.CurrentZ + 0.01);
+            CNC_Z_m(0);
+            CNC_Pump(false);
+            CNC_Z_m(Cnc.CurrentZ - 0.01);
+            CNC_Z_m(Cnc.CurrentZ + 0.01);
+            CNC_XY_m(5, 5);
+            //CNC_XY_m(100, 100);
+            Debug.WriteLine("$$ Test Home Done");
+            */
             DoHoming();
         }
 
@@ -4430,8 +4559,11 @@ namespace LitePlacer
                     Cnc.ErrorState = false;
                     Setting.CNC_SerialPort = comboBoxSerialPorts.SelectedItem.ToString();
                     UpdateCncConnectionStatus();
-                    if (ControlBoardJustConnected())
-                    {
+                    if (ControlBoardJustConnected()) {
+                        if (Cnc.Controlboard == CNC.ControlBoardType.TinyG)
+                        {
+                            Cnc.RawWrite("\"{ sv: 1}\"");
+                        }
                         OfferHoming();
                     }
                     else
@@ -4610,7 +4742,17 @@ namespace LitePlacer
         // Called from CNC class when UI need updating
         public void ValueUpdater(string item, string value)
         {
-            if (InvokeRequired) { Invoke(new Action<string, string>(ValueUpdater), new[] { item, value }); return; }
+            if (InvokeRequired)
+            {
+                //Debug.WriteLine(DateTime.Now.ToString("ss ffff ") + "  ValueUpdater Inkoke:" + item + "  " + value);
+                Invoke(new Action<string, string>(ValueUpdater), new[] { item, value });
+
+                return;
+            }
+            else {
+
+                //Debug.WriteLine(DateTime.Now.ToString("ss ffff ") + "  ValueUpdater  No Inkoke:" + item + "  " + value);
+            }
             // DisplayText("ValueUpdater: item= " + item + ", value= " + value);
 
             switch (item)
@@ -9356,6 +9498,7 @@ namespace LitePlacer
             };
 
             // Pickup:
+            //ZGuardOff(); // testing
             switch (Method)
             {
                 case "Place":
@@ -9460,14 +9603,27 @@ namespace LitePlacer
             };
 
             // Take the part to position:
-            DisplayText("PlacePart_m: goto placement position");
+
+            //Debug.WriteLine(DateTime.Now.ToString("ss ffff ") + "  PlacePart_m: goto placement position");
+        
+            
+            /*
+            DisplayText("Nozzle down ?.");
+            var  a = ShowMessageBox(
+               "Is Nozzle is down.",
+               "Danger to Nozzle",
+               MessageBoxButtons.OK);
+               */
+            //Debug.WriteLine(DateTime.Now.ToString("ss ffff ") + "  ");
             if (!Nozzle.Move_m(X, Y, A))
             {
+                //Debug.WriteLine(DateTime.Now.ToString("ss ffff ") + "  Abort Move Z down!!");
                 // VacuumOff();  if the above failed CNC seems to be down; low chances that VacuumOff() would go thru either. 
                 DownCamera.Draw_Snapshot = false;
                 UpCamera.Draw_Snapshot = false;
                 return false;
             }
+            //ZGuardOn();  // testing
 
             // Place it:
             if (AbortPlacement)
@@ -15578,7 +15734,13 @@ namespace LitePlacer
             CNC_RawWrite("{\"gc\":\"G28.3 A0\"}");
         }
 
-
+        private void buttonUSBReset_Click(object sender, EventArgs e)
+        {
+            int unicode = 0x18;
+            char character = (char)unicode;
+            string text = character.ToString();
+            Cnc.ForceWrite(text);
+        }
     }	// end of: 	public partial class FormMain : Form
 
 
